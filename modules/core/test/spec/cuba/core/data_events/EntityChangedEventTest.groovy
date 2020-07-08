@@ -16,6 +16,7 @@
 package spec.cuba.core.data_events
 
 import com.haulmont.bali.db.QueryRunner
+import com.haulmont.cuba.core.Persistence
 import com.haulmont.cuba.core.Transaction
 import com.haulmont.cuba.core.TransactionalDataManager
 import com.haulmont.cuba.core.app.dynamicattributes.DynamicAttributesManagerAPI
@@ -39,7 +40,8 @@ import java.time.LocalDate
 
 class EntityChangedEventTest extends Specification {
 
-    @Shared @ClassRule
+    @Shared
+    @ClassRule
     public TestContainer cont = TestContainer.Common.INSTANCE
 
     private TestEntityChangedEventListener listener
@@ -159,6 +161,89 @@ class EntityChangedEventTest extends Specification {
         beforeCommit().event.changes.getOldValue('date') == null
         beforeCommit().event.changes.getOldValue('customer') == null
 
+        cleanup:
+
+        cont.deleteRecord(order)
+    }
+
+    def "test changes after flush"() {
+        Order order = metadata.create(Order)
+        order.setNumber('235')
+
+        dataManager.commit(order)
+
+        listener.clear()
+
+        when: "set initial value to dynamic attributes"
+        def persistence = AppBeans.get(Persistence)
+
+        def tx = txDataManager.transactions().create()
+        try {
+            def em = persistence.entityManager
+
+            Order reloadedOrder = em.find(Order, order.id)
+            reloadedOrder.setNumber('222')
+
+            // Trigger flush()
+            //em.flush()
+            reloadedOrder = em.find(Order, order.id, View.MINIMAL)
+
+            reloadedOrder.setDate(new Date())
+            tx.commit()
+        } finally {
+            tx.end()
+        }
+
+        then:
+
+        listener.entityChangedEvents.size() == 2
+
+        beforeCommit().event.getEntityId().value == order.id
+        beforeCommit().event.changes.isChanged('number')
+        beforeCommit().event.changes.isChanged('date')
+
+        listener.clear()
+        cleanup:
+
+        cont.deleteRecord(order)
+    }
+
+    def "test changes after flush with no changes"() {
+        Order order = metadata.create(Order)
+        order.setNumber('235')
+
+        dataManager.commit(order)
+
+        listener.clear()
+
+        when: "set initial value to dynamic attributes"
+        def persistence = AppBeans.get(Persistence)
+
+        def tx = txDataManager.transactions().create()
+        try {
+            def em = persistence.entityManager
+
+            Order reloadedOrder = em.find(Order, order.id)
+            reloadedOrder.setNumber('222')
+
+            // Trigger flush()
+            //em.flush()
+            reloadedOrder = em.find(Order, order.id, View.MINIMAL)
+
+            tx.commit()
+        } finally {
+            tx.end()
+        }
+
+        then:
+
+        listener.entityChangedEvents.size() == 2
+
+        beforeCommit().event.getEntityId().value == order.id
+        beforeCommit().event.changes.isChanged('number')
+        beforeCommit().event.changes.isChanged('date')
+
+        listener.clear()
         cleanup:
 
         cont.deleteRecord(order)
